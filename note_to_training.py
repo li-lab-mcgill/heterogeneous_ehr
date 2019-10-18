@@ -48,8 +48,10 @@ if __name__ == '__main__':
     print("data read")
 
     # merge notes of same HADM_ID
-    merged_data = data.dropna()[['SUBJECT_ID', "HADM_ID"]].drop_duplicates()
+    merged_data = data[['SUBJECT_ID', "HADM_ID"]].drop_duplicates()
     merged_data["ALLTEXT"] = merged_data.HADM_ID.apply(lambda hadm_id: "\n".join(data[data.HADM_ID == hadm_id].TEXT))
+    merged_data.dropna()
+    print('after merging notes of same HADM_ID, we have', merged_data.shape[0], 'unique HADM_IDs')
 
     # preprocess notes
     merged_data["PROCTEXT"] = merged_data.ALLTEXT.apply(lambda text: preprocess_text(text))
