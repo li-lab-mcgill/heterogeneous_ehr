@@ -7,18 +7,23 @@ from sklearn.feature_extraction.text import CountVectorizer
 import pandas as pd
 import numpy as np
 from tqdm import tqdm
-import os
+import os, pickle
+from multiprocessing import Pool
 
 def parse_args():
     parser = argparse.ArgumentParser(description='Preprocess notes, extract ventilation duration, and prepare for running MixEHR')
     parser.add_argument('input_file_path', help='path to the original file')
     parser.add_argument('output_directory', help='directory to store outputs')
-    parser.add_argument('--no_data', action='store_true', help='NOT output data')
-    parser.add_argument('--no_vocab', action='store_true', help='NOT store vocabulary')
+    parser.add_argument('--no_data', action='store_true', help='NOT outputing data')
+    parser.add_argument('--use_vocab', help='specify vocabulary to use. setting no_vocab to true')
+    parser.add_argument('--no_vocab', action='store_true', help='NOT storing vocabulary')
     parser.add_argument('-m', '--meta_data', action='store_true', help='output meta data (default not)')
     parser.add_argument('-v', '--ventilation_duration', action='store_true', help='output ventilation duration (default not)')
     parser.add_argument('-s', '--split_datasets', action='store_true', help='split the whole cohort into train/validation/test (default not)')
     return parser.parse_args()
+
+def merge_notes(hadm_id):
+    return "\n".join(data[data.HADM_ID == hadm_id].TEXT)
 
 def preprocess_text(text):
     # convert to lower case
@@ -30,8 +35,10 @@ def preprocess_text(text):
     # remove numbers
     no_num = no_white.translate(str.maketrans("", "", string.digits))
     # remove stopwords
-    sw = set(stopwords.words('english'))
-    no_sw = " ".join([word for word in no_num.split() if word not in sw])
+    normal_sws = list(set(stopwords.words('english')))
+#     more_sws = pickle.load(open('/home/mcb/li_lab/zwen8/data/mimic/more_stopwords.pickle', 'rb'))
+#     sws = set(normal_sws + more_sws)
+    no_sw = " ".join([word for word in no_num.split() if word not in normal_sws])
     return no_sw
 
 def get_unigram_counts(text):
@@ -43,18 +50,24 @@ if __name__ == '__main__':
     args = parse_args()
     if args.no_vocab and args.no_data and not args.meta_data and not args.ventilation_duration:
         raise Exception('no output specified')
+    if args.use_vocab:
+        args.no_vocab = True
 
     data = pd.read_csv(args.input_file_path)
     print("data read")
 
     # merge notes of same HADM_ID
     merged_data = data[['SUBJECT_ID', "HADM_ID"]].drop_duplicates()
-    merged_data["ALLTEXT"] = merged_data.HADM_ID.apply(lambda hadm_id: "\n".join(data[data.HADM_ID == hadm_id].TEXT))
+#     merged_data["ALLTEXT"] = merged_data.HADM_ID.apply(lambda hadm_id: "\n".join(data[data.HADM_ID == hadm_id].TEXT))
+    with Pool(processes=10) as pool:
+        merged_data["ALLTEXT"] = pool.map(merge_notes, merged_data['HADM_ID'])
     merged_data.dropna()
     print('after merging notes of same HADM_ID, we have', merged_data.shape[0], 'unique HADM_IDs')
 
     # preprocess notes
-    merged_data["PROCTEXT"] = merged_data.ALLTEXT.apply(lambda text: preprocess_text(text))
+#     merged_data["PROCTEXT"] = merged_data.ALLTEXT.apply(lambda text: preprocess_text(text))
+    with Pool(processes=10) as pool:
+        merged_data["PROCTEXT"] = pool.map(preprocess_text, merged_data['ALLTEXT'])
     print("notes preprocessed")
 
     # get ventilation duration
@@ -78,25 +91,16 @@ if __name__ == '__main__':
         train_data = merged_data
         
     # find words to drop
-    vectorizer = CountVectorizer(min_df=5)
-    _ = vectorizer.fit_transform(train_data['PROCTEXT'])
-    word_index = {word: idx for idx, word in enumerate(vectorizer.get_feature_names())}
-    
-#     train_data['UNIQ_WORDS'] = train_data.PROCTEXT.apply(lambda text: ' '.join(list(set(text.split()))))
-#     word_counts = get_unigram_counts(train_data['UNIQ_WORDS'])
-#     word_index = {} # dict for word index
-#     current_index = 0   # store current maximal index
-#     for sentence in train_data["UNIQ_WORDS"].tolist():
-#         for word in set(sentence.split()):
-#             if word_counts[word] < 5:
-#                 continue
-#             if word in word_index.keys():
-#                 index = word_index[word]
-#             else:
-#                 index = current_index + 1
-#                 current_index += 1
-#                 word_index[word] = index
-    print('word indexes generated')
+    if not args.use_vocab:
+        vectorizer = CountVectorizer(max_df=0.1, min_df=5)
+        _ = vectorizer.fit_transform(train_data['PROCTEXT'])
+        word_index = {word: idx for idx, word in enumerate(vectorizer.get_feature_names())}
+        print('word indexes generated')
+    else:
+        with open(args.use_vocab, 'r') as file:
+            vocab = [line.rstrip('\n') for line in file.readlines()]
+        word_index = {line.split(',')[0]: line.split(',')[1] for line in vocab}
+        print('read word indexes from', args.use_vocab)
 
     # store vocabulary
     if not args.no_vocab:
