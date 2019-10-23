@@ -63,7 +63,7 @@ normed_mixtures.sum(axis=1)
 
 ## Compute Pearson correlation
 
-
+Correlating topics' mixtures over admissions with ventilation duration
 ```python
 corr = normed_mixtures.apply(lambda mixture: mixture.corr(duration, method='pearson'))
 ```
@@ -92,7 +92,7 @@ plt.ylabel('Pearson Correlation')
 ![png](output_20_1.png)
 
 
-## Select most correlated topics and map back to words
+### Select most correlated topics
 
 
 ```python
@@ -120,13 +120,13 @@ top_topics
 
 
 
-## Extract top words in those top topics
+### Extract top words in those top topics
 
-Read topic's mixtures.
+Read topics' mixtures over words.
 ```python
 phis_df = pd.read_csv(r'/home/mcb/li_lab/zwen8/data/mimic/all_notes_nosws_train_mixehr/data_JCVB0_nmar_K50_iter632_phi_normalized.csv', header=None)
 ```
-Here `phis_df` is (size of vocabulary, # of topics)
+Here `phis_df` is (size of vocabulary, # of topics). Each column represents a topic's mixture over the whole vocabulary.
 
 ```python
 phis_df.columns = ['PLACE_HOLD', 'WORD_ID'] + [str(idx) for idx in range(50)]
@@ -159,7 +159,7 @@ for sublist in top_words_bytopic:
 ```python
 word_topic_matrix = top_phis_df.iloc[[word_id for word_id in top_words]]
 ```
-Plot heatmap
+Plot heatmap. x-axis is top number and y-axis is word.
 
 ```python
 yticklabels = [vocab_df[vocab_df['WORD_ID'] == word_id]['WORD'].values[0] for word_id in top_words]
@@ -182,8 +182,10 @@ plt.title('top words heatmap, pearson correlation with continuous duration')
 
 ![png](output_40_1.png)
 
+Here pattern is very distinctive. Top words in each topic are different from those in other topics, indicating topics learned capture different aspects of notes. Understanding these topics' medical meanings (i.e. what these top words mean for MV) require opinions from medical experts.
 
 And clustermap
+
 ```python
 sns.set()
 sns.clustermap(word_topic_matrix.iloc[:, 1:], yticklabels=yticklabels, xticklabels=xticklabels)
@@ -198,7 +200,7 @@ sns.clustermap(word_topic_matrix.iloc[:, 1:], yticklabels=yticklabels, xticklabe
 ![png](output_41_1.png)
 
 
-## Binary duration
+## Binarized duration
 Thresholding at 7 days. Same operations as above.
 
 
@@ -235,7 +237,7 @@ plt.ylabel('Pearson Correlation')
 ![png](output_46_1.png)
 
 
-## Select most correlated topics and map back to words
+### Select most correlated topics
 
 
 ```python
@@ -255,7 +257,7 @@ bi_top_topics = bi_top_pos + bi_top_neg
 
 
 
-## Extract top words in those top topics
+### Extract top words in those top topics
 
 
 ```python
@@ -290,14 +292,13 @@ for sublist in bi_top_words_bytopic:
 bi_word_topic_matrix = bi_top_phis_df.iloc[[word_id for word_id in bi_top_words]]
 ```
 
+Have a look at vocabulary's size
 ```python
 vocab_df.shape
 ```
 
 
     (29689, 2)
-
-There are 29689 'word's in the vocabulary.
 
 
 ```python
@@ -374,7 +375,7 @@ plt.ylabel('Cosine Similarity')
 ![png](output_71_1.png)
 
 
-## Select most correlated topics and map back to words
+### Select most correlated topics
 
 
 ```python
@@ -388,7 +389,7 @@ def find_max_n(numbers, n=3):
 cos_top_topics = find_max_n(list(cos), 6)
 ```
 
-## Extract top words in those top topics
+### Extract top words in those top topics
 
 
 ```python
@@ -450,7 +451,7 @@ sns.clustermap(cos_word_topic_matrix.iloc[:, 1:], yticklabels=cos_yticklabels, x
 ![png](output_84_1.png)
 
 
-### Cosine similarity with binarized duration
+## Cosine similarity with binarized duration
 
 
 ```python
@@ -481,14 +482,14 @@ plt.ylabel('Cosine Similarity')
 ![png](output_88_1.png)
 
 
-## Select most correlated topics and map back to words
+### Select most correlated topics
 
 
 ```python
 bi_cos_top_topics = find_max_n(list(bi_cos), 6)
 ```
 
-## Extract top words in those top topics
+### Extract top words in those top topics
 
 
 ```python
