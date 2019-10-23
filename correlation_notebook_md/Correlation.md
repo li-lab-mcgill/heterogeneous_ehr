@@ -199,7 +199,7 @@ sns.clustermap(word_topic_matrix.iloc[:, 1:], yticklabels=yticklabels, xticklabe
 
 
 ## Binary duration
-Thresholding at 7 day. Same operations as above.
+Thresholding at 7 days. Same operations as above.
 
 
 ```python
@@ -297,7 +297,7 @@ vocab_df.shape
 
     (29689, 2)
 
-There are 29689 'words' in the vocabulary.
+There are 29689 'word's in the vocabulary.
 
 
 ```python
@@ -454,7 +454,7 @@ sns.clustermap(cos_word_topic_matrix.iloc[:, 1:], yticklabels=cos_yticklabels, x
 
 
 ```python
-bi_cos = normed_mixtures.apply(lambda mixture: mixture.corr(binary_duration, method=inner_prod))
+bi_cos = normed_mixtures.corrwith(binary_duration, method=cosine)
 ```
 
 
