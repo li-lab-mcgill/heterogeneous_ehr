@@ -9,6 +9,7 @@ import numpy as np
 from tqdm import tqdm
 import os, pickle
 from multiprocessing import Pool
+from itertools import repeat
 
 def parse_args():
     parser = argparse.ArgumentParser(description='Preprocess notes, extract ventilation duration, and prepare for running MixEHR')
@@ -45,6 +46,24 @@ def get_unigram_counts(text):
     text_word = [sentence.split() for sentence in text]
     text_unigram = [ngrams(sentence, 1) for sentence in text_word]
     return NgramCounter(text_unigram)
+
+def create_output_dataframe(data, word_index, args):
+    ids = data["HADM_ID"].unique().tolist()  # HADM_IDs
+    output = []
+    ventilation_duration = []
+    for idx, id in tqdm(enumerate(ids)):
+        set_ventilation = False # indicate whether ventilation duration is calculated
+        if not args.no_data or args.ventilation_duration:
+            unigram_counts = get_unigram_counts(data[data.HADM_ID == id]["PROCTEXT"].tolist())
+            for word in set(data[data.HADM_ID == id]["PROCTEXT"].values[0].split()):
+                if word not in word_index.keys():
+                    continue
+                if not args.no_data:
+                    output.append(" ".join([str(idx), "1", str(word_index[word]), "0", str(unigram_counts[word])]))
+                if args.ventilation_duration and not set_ventilation:
+                    set_ventilation = True
+                    ventilation_duration.append(" ".join([str(idx), str(data[data.HADM_ID == id]["DURATION"].values[0])]))
+    return output, ventilation_duration
 
 if __name__ == '__main__':
     args = parse_args()
@@ -83,17 +102,15 @@ if __name__ == '__main__':
         train_data = merged_data.sample(frac=0.8, random_state=1)
         valid_data = merged_data.drop(train_data.index).sample(frac=0.5, random_state=1)
         test_data = merged_data.drop(train_data.index).drop(valid_data.index)
-        train_data.to_csv(os.path.join(args.output_directory, 'train.txt'), header=False, index=False)   
-        valid_data.to_csv(os.path.join(args.output_directory, 'validation.txt'), header=False, index=False) 
-        test_data.to_csv(os.path.join(args.output_directory, 'test.txt'), header=False, index=False) 
+        train_data.to_csv(os.path.join(args.output_directory, 'train_notes.txt'), header=False, index=False)   
+        valid_data.to_csv(os.path.join(args.output_directory, 'validation_notes.txt'), header=False, index=False) 
+        test_data.to_csv(os.path.join(args.output_directory, 'test_notes.txt'), header=False, index=False) 
         print('train/valid/test sets written to', args.output_directory)
-    else:
-        train_data = merged_data
         
-    # find words to drop
+    # generate word indexes
     if not args.use_vocab:
         vectorizer = CountVectorizer(max_df=0.1, min_df=5)
-        _ = vectorizer.fit_transform(train_data['PROCTEXT'])
+        _ = vectorizer.fit_transform(merged_data['PROCTEXT'])
         word_index = {word: idx for idx, word in enumerate(vectorizer.get_feature_names())}
         print('word indexes generated')
     else:
@@ -110,20 +127,29 @@ if __name__ == '__main__':
         print('vocabulary written to', os.path.join(args.output_directory, 'vocab.txt'))
             
     # create output dataframe
-    ids = train_data["HADM_ID"].unique().tolist()  # HADM_IDs
-    output = []
-    ventilation_duration = []
-    for idx, id in tqdm(enumerate(ids)):
-        set_ventilation = False # indicate whether ventilation duration is calculated
-        if not args.no_data or args.ventilation_duration:
-            unigram_counts = get_unigram_counts(train_data[train_data.HADM_ID == id]["PROCTEXT"].tolist())
-            for word in set(train_data[train_data.HADM_ID == id]["PROCTEXT"].values[0].split()):
-                if word not in word_index.keys():
-                    continue
-                output.append(" ".join([str(idx), "1", str(word_index[word]), "0", str(unigram_counts[word])]))
-                if args.ventilation_duration and not set_ventilation:
-                    set_ventilation = True
-                    ventilation_duration.append(" ".join([str(idx), str(train_data[train_data.HADM_ID == id]["DURATION"].values[0])]))
+#     ids = train_data["HADM_ID"].unique().tolist()  # HADM_IDs
+#     output = []
+#     ventilation_duration = []
+#     for idx, id in tqdm(enumerate(ids)):
+#         set_ventilation = False # indicate whether ventilation duration is calculated
+#         if not args.no_data or args.ventilation_duration:
+#             unigram_counts = get_unigram_counts(train_data[train_data.HADM_ID == id]["PROCTEXT"].tolist())
+#             for word in set(train_data[train_data.HADM_ID == id]["PROCTEXT"].values[0].split()):
+#                 if word not in word_index.keys():
+#                     continue
+#                 output.append(" ".join([str(idx), "1", str(word_index[word]), "0", str(unigram_counts[word])]))
+#                 if args.ventilation_duration and not set_ventilation:
+#                     set_ventilation = True
+#                     ventilation_duration.append(" ".join([str(idx), str(train_data[train_data.HADM_ID == id]["DURATION"].values[0])]))
+    if not args.split_datasets:
+        output, ventilation_duration = create_output_dataframe(merged_data, word_index, args)
+    else:
+        with Pool(processes=3) as pool:
+            (train_output, train_ventilation_duration), (valid_output, valid_ventilation_duration), (test_output, test_ventilation_duration) = \
+            pool.starmap(create_output_dataframe, zip([train_data, valid_data, test_data], repeat(word_index), repeat(args)))
+#             valid_output, valid_ventilation_duration = create_output_dataframe(valid_data, word_index, args)
+#             test_output, test_ventilation_duration = create_output_dataframe(test_data, word_index, args)
+        
     print("data ready")
     
     # create meta data
@@ -133,14 +159,32 @@ if __name__ == '__main__':
     
     # write to output
     if not args.no_data:
-        with open(os.path.join(args.output_directory, 'data.txt'), "w") as file:
-            file.writelines("\n".join(output))
-        print("data written to", os.path.join(args.output_directory, 'data.txt'))
+        if not args.split_datasets:
+            with open(os.path.join(args.output_directory, 'data.txt'), "w") as file:
+                file.writelines("\n".join(output))
+            print("data written to", os.path.join(args.output_directory, 'data.txt'))
+        else:
+            with open(os.path.join(args.output_directory, 'train_data.txt'), "w") as file:
+                file.writelines("\n".join(train_output))
+            with open(os.path.join(args.output_directory, 'validation_data.txt'), "w") as file:
+                file.writelines("\n".join(valid_output))
+            with open(os.path.join(args.output_directory, 'test_data.txt'), "w") as file:
+                file.writelines("\n".join(test_output))
+            print("data written to", os.path.join(args.output_directory, 'train_data/validation_data/test_data.txt'))
     if args.meta_data:
         with open(os.path.join(args.output_directory, 'meta.txt'), "w") as file:
             file.writelines("\n".join(meta_data))
         print("meta data written to", os.path.join(args.output_directory, 'meta.txt'))
     if args.ventilation_duration:
-        with open(os.path.join(args.output_directory, 'vent.txt'), "w") as file:
-            file.writelines("\n".join(ventilation_duration))
-        print("ventilation duration written to", os.path.join(args.output_directory, 'vent.txt'))
+        if not args.split_datasets:
+            with open(os.path.join(args.output_directory, 'vent.txt'), "w") as file:
+                file.writelines("\n".join(ventilation_duration))
+            print("ventilation duration written to", os.path.join(args.output_directory, 'vent.txt'))
+        else:
+            with open(os.path.join(args.output_directory, 'train_vent.txt'), "w") as file:
+                file.writelines("\n".join(train_ventilation_duration))
+            with open(os.path.join(args.output_directory, 'validation_vent.txt'), "w") as file:
+                file.writelines("\n".join(valid_ventilation_duration))
+            with open(os.path.join(args.output_directory, 'test_vent.txt'), "w") as file:
+                file.writelines("\n".join(test_ventilation_duration))
+            print("ventilation duration written to", os.path.join(args.output_directory, 'train_vent/validation_vent/test_vent.txt'))
