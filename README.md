@@ -13,7 +13,7 @@ The cohort was chosen based on the following pipeline:
 
 To filter the dataset, run the following command:
 
-> python cohort_filtering.py --cohort_file "path/to/cohort/file" --notes_file "path/to/notes/file" --categories [list, of, note, categories] --verbosity 1/0
+`python cohort_filtering.py --cohort_file "path/to/cohort/file" --notes_file "path/to/notes/file" --categories [list, of, note, categories] --verbosity 1/0`
 
 This code assumes you have the cohort file and the notes file handy.
 
