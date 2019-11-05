@@ -23,8 +23,8 @@ def parse_args():
     parser.add_argument('-s', '--split_datasets', action='store_true', help='split the whole cohort into train/validation/test (default not)')
     return parser.parse_args()
 
-def merge_notes(hadm_id):
-    return "\n".join(data[data.HADM_ID == hadm_id].TEXT)
+def merge_notes(hadm_id, category):
+    return "\n".join(data[(data.HADM_ID == hadm_id) | (data.CATEGORY == category)].TEXT)
 
 def preprocess_text(text):
     # convert to lower case
@@ -76,12 +76,12 @@ if __name__ == '__main__':
     print("data read")
 
     # merge notes of same HADM_ID
-    merged_data = data[['SUBJECT_ID', "HADM_ID"]].drop_duplicates()
+    merged_data = data[['SUBJECT_ID', "HADM_ID", "CATEGORY"]].drop_duplicates()
 #     merged_data["ALLTEXT"] = merged_data.HADM_ID.apply(lambda hadm_id: "\n".join(data[data.HADM_ID == hadm_id].TEXT))
     with Pool(processes=10) as pool:
-        merged_data["ALLTEXT"] = pool.map(merge_notes, merged_data['HADM_ID'])
+        merged_data["ALLTEXT"] = pool.starmap(merge_notes, zip(par_merged_data['HADM_ID'], par_merged_data['CATEGORY']))
     merged_data.dropna()
-    print('after merging notes of same HADM_ID, we have', merged_data.shape[0], 'unique HADM_IDs')
+    print('after merging notes of same HADM_ID and same CATEGORY, we have', merged_data.shape[0], 'unique HADM_ID - CATEGORY pairs')
 
     # preprocess notes
 #     merged_data["PROCTEXT"] = merged_data.ALLTEXT.apply(lambda text: preprocess_text(text))
