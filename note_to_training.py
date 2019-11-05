@@ -7,9 +7,17 @@ from sklearn.feature_extraction.text import CountVectorizer
 import pandas as pd
 import numpy as np
 from tqdm import tqdm
+import parmap
 import os, pickle
 from multiprocessing import Pool
 from itertools import repeat
+
+# categories and type ids
+category_to_id = {
+    'Physician ': '1',
+    'Nursing': '2',
+    'Respiratory ': '3',
+}
 
 def parse_args():
     parser = argparse.ArgumentParser(description='Preprocess notes, extract ventilation duration, and prepare for running MixEHR')
@@ -21,10 +29,15 @@ def parse_args():
     parser.add_argument('-m', '--meta_data', action='store_true', help='output meta data (default not)')
     parser.add_argument('-v', '--ventilation_duration', action='store_true', help='output ventilation duration (default not)')
     parser.add_argument('-s', '--split_datasets', action='store_true', help='split the whole cohort into train/validation/test (default not)')
+    parser.add_argument('--no_phy', action='store_true', help='NOT using physicians notes')
+    parser.add_argument('--no_nur', action='store_true', help='NOT using nurses notes')
+    parser.add_argument('--res', action='store_true', help='using respiratory notes')
+    parser.add_argument('--max_procs', type=int, help='maximal number of processes (default 10)', default=10)
     return parser.parse_args()
 
 def merge_notes(hadm_id, category):
-    return "\n".join(data[(data.HADM_ID == hadm_id) | (data.CATEGORY == category)].TEXT)
+    tmp_data = data[data.HADM_ID == hadm_id]
+    return "\n".join(tmp_data[tmp_data.CATEGORY == category].TEXT)
 
 def preprocess_text(text):
     # convert to lower case
@@ -54,38 +67,64 @@ def create_output_dataframe(data, word_index, args):
     for idx, id in tqdm(enumerate(ids)):
         set_ventilation = False # indicate whether ventilation duration is calculated
         if not args.no_data or args.ventilation_duration:
-            unigram_counts = get_unigram_counts(data[data.HADM_ID == id]["PROCTEXT"].tolist())
-            for word in set(data[data.HADM_ID == id]["PROCTEXT"].values[0].split()):
-                if word not in word_index.keys():
-                    continue
-                if not args.no_data:
-                    output.append(" ".join([str(idx), "1", str(word_index[word]), "0", str(unigram_counts[word])]))
-                if args.ventilation_duration and not set_ventilation:
-                    set_ventilation = True
-                    ventilation_duration.append(" ".join([str(idx), str(data[data.HADM_ID == id]["DURATION"].values[0])]))
+            for _, row in data[data['HADM_ID'] == id].iterrows():
+                unigram_counts = get_unigram_counts(row["PROCTEXT"].tolist())
+                for word in set(row["PROCTEXT"].values[0].split()):
+                    if word not in word_index.keys():
+                        continue
+                    if not args.no_data:
+                        output.append(" ".join([str(idx), category_to_id[row['CATEGORY']], str(word_index[word]), "0", str(unigram_counts[word])]))
+                    if args.ventilation_duration and not set_ventilation:
+                        set_ventilation = True
+                        ventilation_duration.append(" ".join([str(idx), str(data[data.HADM_ID == id]["DURATION"].values[0])]))
+    
+#     for idx, id in tqdm(enumerate(ids)):
+#         set_ventilation = False # indicate whether ventilation duration is calculated
+#         if not args.no_data or args.ventilation_duration:
+#             unigram_counts = get_unigram_counts(data[data.HADM_ID == id]["PROCTEXT"].tolist())
+#             for word in set(data[data.HADM_ID == id]["PROCTEXT"].values[0].split()):
+#                 if word not in word_index.keys():
+#                     continue
+#                 if not args.no_data:
+#                     output.append(" ".join([str(idx), "1", str(word_index[word]), "0", str(unigram_counts[word])]))
+#                 if args.ventilation_duration and not set_ventilation:
+#                     set_ventilation = True
+#                     ventilation_duration.append(" ".join([str(idx), str(data[data.HADM_ID == id]["DURATION"].values[0])]))
     return output, ventilation_duration
 
 if __name__ == '__main__':
     args = parse_args()
     if args.no_vocab and args.no_data and not args.meta_data and not args.ventilation_duration:
         raise Exception('no output specified')
+    if args.no_phy and args.no_nur and not args.res:
+        raise Exception('not using any type of note (physicians, nurses, respiratory)')
     if args.use_vocab:
         args.no_vocab = True
 
     data = pd.read_csv(args.input_file_path)
     print("data read")
 
-    # merge notes of same HADM_ID
-    merged_data = data[['SUBJECT_ID', "HADM_ID", "CATEGORY"]].drop_duplicates()
+    categories = []
+    if not args.no_phy:
+        categories.append('Physician ')
+    if not args.no_nur:
+        categories.append('Nursing')
+    if args.res:
+        categories.append('Respiratory ')
+    args.categories = categories
+    
+    # merge notes of same HADM_ID of specified categories
+    merged_data = data[data['CATEGORY'].isin(categories)][['SUBJECT_ID', "HADM_ID", "CATEGORY"]].drop_duplicates()
 #     merged_data["ALLTEXT"] = merged_data.HADM_ID.apply(lambda hadm_id: "\n".join(data[data.HADM_ID == hadm_id].TEXT))
-    with Pool(processes=10) as pool:
-        merged_data["ALLTEXT"] = pool.starmap(merge_notes, zip(par_merged_data['HADM_ID'], par_merged_data['CATEGORY']))
+    with Pool(processes=args.max_procs) as pool:
+        merged_data["ALLTEXT"] = pool.starmap(merge_notes, zip(merged_data['HADM_ID'], merged_data['CATEGORY']))
+#     parmap.starmap(merge_notes, list(zip(merged_data['HADM_ID'], merged_data['CATEGORY'])), pm_processes=10, pm_pbar=True)
     merged_data.dropna()
     print('after merging notes of same HADM_ID and same CATEGORY, we have', merged_data.shape[0], 'unique HADM_ID - CATEGORY pairs')
 
     # preprocess notes
 #     merged_data["PROCTEXT"] = merged_data.ALLTEXT.apply(lambda text: preprocess_text(text))
-    with Pool(processes=10) as pool:
+    with Pool(processes=args.max_procs) as pool:
         merged_data["PROCTEXT"] = pool.map(preprocess_text, merged_data['ALLTEXT'])
     print("notes preprocessed")
 
@@ -110,7 +149,7 @@ if __name__ == '__main__':
     # generate word indexes
     if not args.use_vocab:
         vectorizer = CountVectorizer(max_df=0.1, min_df=5)
-        _ = vectorizer.fit_transform(merged_data['PROCTEXT'])
+        vectorizer.fit(merged_data['PROCTEXT'])
         word_index = {word: idx for idx, word in enumerate(vectorizer.get_feature_names())}
         print('word indexes generated')
     else:
@@ -127,24 +166,10 @@ if __name__ == '__main__':
         print('vocabulary written to', os.path.join(args.output_directory, 'vocab.txt'))
             
     # create output dataframe
-#     ids = train_data["HADM_ID"].unique().tolist()  # HADM_IDs
-#     output = []
-#     ventilation_duration = []
-#     for idx, id in tqdm(enumerate(ids)):
-#         set_ventilation = False # indicate whether ventilation duration is calculated
-#         if not args.no_data or args.ventilation_duration:
-#             unigram_counts = get_unigram_counts(train_data[train_data.HADM_ID == id]["PROCTEXT"].tolist())
-#             for word in set(train_data[train_data.HADM_ID == id]["PROCTEXT"].values[0].split()):
-#                 if word not in word_index.keys():
-#                     continue
-#                 output.append(" ".join([str(idx), "1", str(word_index[word]), "0", str(unigram_counts[word])]))
-#                 if args.ventilation_duration and not set_ventilation:
-#                     set_ventilation = True
-#                     ventilation_duration.append(" ".join([str(idx), str(train_data[train_data.HADM_ID == id]["DURATION"].values[0])]))
     if not args.split_datasets:
         output, ventilation_duration = create_output_dataframe(merged_data, word_index, args)
     else:
-        with Pool(processes=3) as pool:
+        with Pool(processes=args.max_procs) as pool:
             (train_output, train_ventilation_duration), (valid_output, valid_ventilation_duration), (test_output, test_ventilation_duration) = \
             pool.starmap(create_output_dataframe, zip([train_data, valid_data, test_data], repeat(word_index), repeat(args)))
 #             valid_output, valid_ventilation_duration = create_output_dataframe(valid_data, word_index, args)
