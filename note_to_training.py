@@ -24,7 +24,7 @@ def parse_args():
     parser.add_argument('input_file_path', help='path to the original file')
     parser.add_argument('output_directory', help='directory to store outputs')
     parser.add_argument('--no_data', action='store_true', help='NOT outputing data')
-    parser.add_argument('--use_vocab', help='specify vocabulary to use. setting no_vocab to true')
+    parser.add_argument('--use_vocab', help='specify directory containing the vocabulary to use. setting no_vocab to true')
     parser.add_argument('--no_vocab', action='store_true', help='NOT storing vocabulary')
     parser.add_argument('-m', '--meta_data', action='store_true', help='output meta data (default not)')
     parser.add_argument('-v', '--ventilation_duration', action='store_true', help='output ventilation duration (default not)')
@@ -60,7 +60,12 @@ def get_unigram_counts(text):
     text_unigram = [ngrams(sentence, 1) for sentence in text_word]
     return NgramCounter(text_unigram)
 
-def create_output_dataframe(data, word_index, args):
+def get_word_index(data, max_df=0.1, min_df=5):
+    vectorizer = CountVectorizer(max_df=max_df, min_df=min_df)
+    vectorizer.fit(data['PROCTEXT'])
+    return {word: idx for idx, word in enumerate(vectorizer.get_feature_names())}
+
+def create_output_dataframe(data, word_indexes, args):
     ids = data["HADM_ID"].unique().tolist()  # HADM_IDs
     output = []
     ventilation_duration = []
@@ -70,10 +75,10 @@ def create_output_dataframe(data, word_index, args):
             for _, row in data[data['HADM_ID'] == id].iterrows():
                 unigram_counts = get_unigram_counts(row["PROCTEXT"].tolist())
                 for word in set(row["PROCTEXT"].values[0].split()):
-                    if word not in word_index.keys():
+                    if word not in word_indexes[row['CATEGORY']].keys():
                         continue
                     if not args.no_data:
-                        output.append(" ".join([str(idx), category_to_id[row['CATEGORY']], str(word_index[word]), "0", str(unigram_counts[word])]))
+                        output.append(" ".join([str(idx), category_to_id[row['CATEGORY']], str(word_indexes[row['CATEGORY']][word]), "0", str(unigram_counts[word])]))
                     if args.ventilation_duration and not set_ventilation:
                         set_ventilation = True
                         ventilation_duration.append(" ".join([str(idx), str(data[data.HADM_ID == id]["DURATION"].values[0])]))
@@ -115,15 +120,12 @@ if __name__ == '__main__':
     
     # merge notes of same HADM_ID of specified categories
     merged_data = data[data['CATEGORY'].isin(categories)][['SUBJECT_ID', "HADM_ID", "CATEGORY"]].drop_duplicates()
-#     merged_data["ALLTEXT"] = merged_data.HADM_ID.apply(lambda hadm_id: "\n".join(data[data.HADM_ID == hadm_id].TEXT))
     with Pool(processes=args.max_procs) as pool:
         merged_data["ALLTEXT"] = pool.starmap(merge_notes, zip(merged_data['HADM_ID'], merged_data['CATEGORY']))
-#     parmap.starmap(merge_notes, list(zip(merged_data['HADM_ID'], merged_data['CATEGORY'])), pm_processes=10, pm_pbar=True)
     merged_data.dropna()
     print('after merging notes of same HADM_ID and same CATEGORY, we have', merged_data.shape[0], 'unique HADM_ID - CATEGORY pairs')
 
     # preprocess notes
-#     merged_data["PROCTEXT"] = merged_data.ALLTEXT.apply(lambda text: preprocess_text(text))
     with Pool(processes=args.max_procs) as pool:
         merged_data["PROCTEXT"] = pool.map(preprocess_text, merged_data['ALLTEXT'])
     print("notes preprocessed")
@@ -148,38 +150,42 @@ if __name__ == '__main__':
         
     # generate word indexes
     if not args.use_vocab:
-        vectorizer = CountVectorizer(max_df=0.1, min_df=5)
-        vectorizer.fit(merged_data['PROCTEXT'])
-        word_index = {word: idx for idx, word in enumerate(vectorizer.get_feature_names())}
+        if not args.split_datasets:
+            word_indexes = {category: get_word_index(merged_data[merged_data['CATEGORY'] == category]) for category in categories}
+        else:
+            word_indexes = {category: get_word_index(train_data[train_data['CATEGORY'] == category]) for category in categories}
         print('word indexes generated')
     else:
-        with open(args.use_vocab, 'r') as file:
-            vocab = [line.rstrip('\n') for line in file.readlines()]
-        word_index = {line.split(',')[0]: line.split(',')[1] for line in vocab}
+        word_indexes = {}
+        for category in categories:
+            with open(os.path.join(args.use_vocab, category_to_id[category] + '_vocab.txt'), 'r') as file:
+                vocab = [line.rstrip('\n') for line in file.readlines()]
+            word_indexes[category] = {line.split(',')[0]: line.split(',')[1] for line in vocab}
         print('read word indexes from', args.use_vocab)
 
     # store vocabulary
     if not args.no_vocab:
-        word_index_output = [','.join([word, str(idx)]) for word, idx in word_index.items()]
-        with open(os.path.join(args.output_directory, 'vocab.txt'), "w") as file:
-            file.writelines('\n'.join(word_index_output))
-        print('vocabulary written to', os.path.join(args.output_directory, 'vocab.txt'))
+        for category in categories:
+            word_index_output = [','.join([word, str(idx)]) for word, idx in word_indexes[category].items()]
+            with open(os.path.join(args.output_directory, category_to_id[category] + '_vocab.txt'), "w") as file:
+                file.writelines('\n'.join(word_index_output))
+        print('vocabulary written to', args.output_directory)
             
     # create output dataframe
     if not args.split_datasets:
-        output, ventilation_duration = create_output_dataframe(merged_data, word_index, args)
+        output, ventilation_duration = create_output_dataframe(merged_data, word_indexes, args)
     else:
         with Pool(processes=args.max_procs) as pool:
             (train_output, train_ventilation_duration), (valid_output, valid_ventilation_duration), (test_output, test_ventilation_duration) = \
-            pool.starmap(create_output_dataframe, zip([train_data, valid_data, test_data], repeat(word_index), repeat(args)))
-#             valid_output, valid_ventilation_duration = create_output_dataframe(valid_data, word_index, args)
-#             test_output, test_ventilation_duration = create_output_dataframe(test_data, word_index, args)
+            pool.starmap(create_output_dataframe, zip([train_data, valid_data, test_data], repeat(word_indexes), repeat(args)))
         
     print("data ready")
     
     # create meta data
     if args.meta_data:
-        meta_data = [" ".join(["1", str(idx), "1"]) for idx in word_index.values()]
+        meta_data = []
+        for category in categories:
+            meta_data += [" ".join([category_to_id[category], str(idx), "1"]) for idx in word_indexes[category].values()]
         print("meta data ready")
     
     # write to output
