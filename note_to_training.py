@@ -29,6 +29,7 @@ def parse_args():
     parser.add_argument('-m', '--meta_data', action='store_true', help='output meta data (default not)')
     parser.add_argument('-v', '--ventilation_duration', action='store_true', help='output ventilation duration (default not)')
     parser.add_argument('-s', '--split_datasets', action='store_true', help='split the whole cohort into train/validation/test (default not)')
+    parser.add_argument('--discard_ids', help='csv file containing the HADM_IDs that should be discarded')
     parser.add_argument('--no_phy', action='store_true', help='NOT using physicians notes')
     parser.add_argument('--no_nur', action='store_true', help='NOT using nurses notes')
     parser.add_argument('--res', action='store_true', help='using respiratory notes')
@@ -56,7 +57,8 @@ def preprocess_text(text):
     return no_sw
 
 def get_unigram_counts(text):
-    text_word = [sentence.split() for sentence in text]
+#     text_word = [sentence.split() for sentence in text]
+    text_word = [text.split()]
     text_unigram = [ngrams(sentence, 1) for sentence in text_word]
     return NgramCounter(text_unigram)
 
@@ -73,8 +75,8 @@ def create_output_dataframe(data, word_indexes, args):
         set_ventilation = False # indicate whether ventilation duration is calculated
         if not args.no_data or args.ventilation_duration:
             for _, row in data[data['HADM_ID'] == id].iterrows():
-                unigram_counts = get_unigram_counts(row["PROCTEXT"].tolist())
-                for word in set(row["PROCTEXT"].values[0].split()):
+                unigram_counts = get_unigram_counts(row["PROCTEXT"])
+                for word in set(row["PROCTEXT"].split()):
                     if word not in word_indexes[row['CATEGORY']].keys():
                         continue
                     if not args.no_data:
@@ -119,7 +121,13 @@ if __name__ == '__main__':
     args.categories = categories
     
     # merge notes of same HADM_ID of specified categories
-    merged_data = data[data['CATEGORY'].isin(categories)][['SUBJECT_ID', "HADM_ID", "CATEGORY"]].drop_duplicates()
+    merged_data = data[data['CATEGORY'].isin(categories)][["HADM_ID", "CATEGORY"]].drop_duplicates()
+    if args.discard_ids:
+        discard_ids_df = pd.read_csv(args.discard_ids, header=None)
+        discard_ids_df.columns = ['HADM_ID']
+        discard_ids = discard_ids_df['HADM_ID'].tolist()
+        merged_data = merged_data[~merged_data['HADM_ID'].isin(discard_ids)]
+        print('discarding', len(discard_ids), 'HADM_IDs')
     with Pool(processes=args.max_procs) as pool:
         merged_data["ALLTEXT"] = pool.starmap(merge_notes, zip(merged_data['HADM_ID'], merged_data['CATEGORY']))
     merged_data.dropna()
@@ -132,7 +140,11 @@ if __name__ == '__main__':
 
     # get ventilation duration
     if args.ventilation_duration:
-        merged_data['STARTTIME'] = pd.to_datetime(merged_data.HADM_ID.apply(lambda hadm_id: np.min(data[data.HADM_ID == hadm_id].STARTTIME)))
+        try:
+            merged_data['STARTTIME'] = pd.to_datetime(merged_data.HADM_ID.apply(lambda hadm_id: np.min(data[data.HADM_ID == hadm_id].STARTTIME)))
+        except:
+            # accommadating files that use FIRST_VENT_STARTTIME to represent STARTTIME
+            merged_data['STARTTIME'] = pd.to_datetime(merged_data.HADM_ID.apply(lambda hadm_id: np.min(data[data.HADM_ID == hadm_id].FIRST_VENT_STARTTIME)))
         merged_data['ENDTIME'] = pd.to_datetime(merged_data.HADM_ID.apply(lambda hadm_id: np.max(data[data.HADM_ID == hadm_id].ENDTIME)))
         merged_data['DURATION'] = pd.to_timedelta(merged_data['ENDTIME'] - merged_data['STARTTIME'], unit='h') / np.timedelta64(1, 'h')
         merged_data.drop(columns=['STARTTIME', 'ENDTIME'])
@@ -143,17 +155,19 @@ if __name__ == '__main__':
         train_data = merged_data.sample(frac=0.8, random_state=1)
         valid_data = merged_data.drop(train_data.index).sample(frac=0.5, random_state=1)
         test_data = merged_data.drop(train_data.index).drop(valid_data.index)
-        train_data.to_csv(os.path.join(args.output_directory, 'train_notes.txt'), header=False, index=False)   
-        valid_data.to_csv(os.path.join(args.output_directory, 'validation_notes.txt'), header=False, index=False) 
-        test_data.to_csv(os.path.join(args.output_directory, 'test_notes.txt'), header=False, index=False) 
+        held_out_ids = pd.concat([valid_data['HADM_ID'], test_data['HADM_ID']], ignore_index=True)
+        train_data.to_csv(os.path.join(args.output_directory, 'train_notes.csv'), header=False, index=False)   
+        valid_data.to_csv(os.path.join(args.output_directory, 'validation_notes.csv'), header=False, index=False) 
+        test_data.to_csv(os.path.join(args.output_directory, 'test_notes.csv'), header=False, index=False) 
+        held_out_ids.to_csv(os.path.join(args.output_directory, 'held_out_ids.csv'), header=False, index=False)
         print('train/valid/test sets written to', args.output_directory)
         
     # generate word indexes
     if not args.use_vocab:
-        if not args.split_datasets:
-            word_indexes = {category: get_word_index(merged_data[merged_data['CATEGORY'] == category]) for category in categories}
-        else:
+        if args.split_datasets:
             word_indexes = {category: get_word_index(train_data[train_data['CATEGORY'] == category]) for category in categories}
+        else:
+            word_indexes = {category: get_word_index(merged_data[merged_data['CATEGORY'] == category]) for category in categories}
         print('word indexes generated')
     else:
         word_indexes = {}
