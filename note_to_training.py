@@ -62,7 +62,7 @@ def get_unigram_counts(text):
     text_unigram = [ngrams(sentence, 1) for sentence in text_word]
     return NgramCounter(text_unigram)
 
-def get_word_index(data, max_df=0.1, min_df=5):
+def get_word_index(data, max_df=0.15, min_df=5):
     vectorizer = CountVectorizer(max_df=max_df, min_df=min_df)
     vectorizer.fit(data['PROCTEXT'])
     return {word: idx for idx, word in enumerate(vectorizer.get_feature_names())}
