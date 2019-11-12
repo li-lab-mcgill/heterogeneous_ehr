@@ -17,6 +17,7 @@ category_to_id = {
     'Physician ': '1',
     'Nursing': '2',
     'Respiratory ': '3',
+    'Nursing/other': '4',
 }
 
 def parse_args():
@@ -33,6 +34,7 @@ def parse_args():
     parser.add_argument('--no_phy', action='store_true', help='NOT using physicians notes')
     parser.add_argument('--no_nur', action='store_true', help='NOT using nurses notes')
     parser.add_argument('--res', action='store_true', help='using respiratory notes')
+    parser.add_argument('--other', action='store_true', help='using nursing/other notes. WARNING: this category contain other types of notes e.g. discharge summary, use with caution')
     parser.add_argument('--max_procs', type=int, help='maximal number of processes (default 10)', default=10)
     return parser.parse_args()
 
@@ -118,6 +120,8 @@ if __name__ == '__main__':
         categories.append('Nursing')
     if args.res:
         categories.append('Respiratory ')
+    if args.other:
+        categories.append('Nursing/other')
     args.categories = categories
     
     # merge notes of same HADM_ID of specified categories
