@@ -156,7 +156,7 @@ if __name__ == '__main__':
 
     # split into train/valid/test sets
     if args.split_datasets:
-        train_data = merged_data.sample(frac=0.8, random_state=1)
+        train_data = merged_data.sample(frac=0.6, random_state=1)
         valid_data = merged_data.drop(train_data.index).sample(frac=0.5, random_state=1)
         test_data = merged_data.drop(train_data.index).drop(valid_data.index)
         held_out_ids = pd.concat([valid_data['HADM_ID'], test_data['HADM_ID']], ignore_index=True)
