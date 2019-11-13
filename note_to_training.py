@@ -75,9 +75,9 @@ def create_output_dataframe(data, word_indexes, args):
     output = []
     ventilation_duration = []
     for idx, id in tqdm(enumerate(ids)):
-        set_ventilation = False # indicate whether ventilation duration is calculated
+        set_ventilation = False # indicate whether ventilation duration is calculated for current HADM_ID
         if not args.no_data or args.ventilation_duration:
-            for _, row in data[data['HADM_ID'] == id].iterrows():
+            for _, row in data[data['HADM_ID'] == id].iterrows(): # for one HADM_ID - CATEGORY pair
                 unigram_counts = get_unigram_counts(row["PROCTEXT"])
                 for word in set(row["PROCTEXT"].split()):
                     if word not in word_indexes[row['CATEGORY']].keys():
@@ -107,7 +107,7 @@ if __name__ == '__main__':
     if args.no_vocab and args.no_data and not args.meta_data and not args.ventilation_duration:
         raise Exception('no output specified')
     if args.no_phy and args.no_nur and not args.res:
-        raise Exception('not using any type of note (physicians, nurses, respiratory)')
+        raise Exception('not using any type of note (physicians, nurses, respiratory, nursing/other)')
     if args.use_vocab:
         args.no_vocab = True
 
