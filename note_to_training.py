@@ -11,6 +11,7 @@ import parmap
 import os, pickle
 from multiprocessing import Pool
 from itertools import repeat
+import time
 
 # categories and type ids
 category_to_id = {
@@ -111,7 +112,7 @@ if __name__ == '__main__':
         args.no_vocab = True
 
     data = pd.read_csv(args.input_file_path)
-    print("data read")
+    print('[' + time.ctime() + ']', "data read")
 
     categories = []
     if not args.no_phy:
@@ -135,12 +136,12 @@ if __name__ == '__main__':
     with Pool(processes=args.max_procs) as pool:
         merged_data["ALLTEXT"] = pool.starmap(merge_notes, zip(merged_data['HADM_ID'], merged_data['CATEGORY']))
     merged_data.dropna()
-    print('after merging notes of same HADM_ID and same CATEGORY, we have', merged_data.shape[0], 'unique HADM_ID - CATEGORY pairs')
+    print('[' + time.ctime() + ']', 'after merging notes of same HADM_ID and same CATEGORY, we have', merged_data.shape[0], 'unique HADM_ID - CATEGORY pairs')
 
     # preprocess notes
     with Pool(processes=args.max_procs) as pool:
         merged_data["PROCTEXT"] = pool.map(preprocess_text, merged_data['ALLTEXT'])
-    print("notes preprocessed")
+    print('[' + time.ctime() + ']', "notes preprocessed")
 
     # get ventilation duration
     if args.ventilation_duration:
@@ -152,7 +153,7 @@ if __name__ == '__main__':
         merged_data['ENDTIME'] = pd.to_datetime(merged_data.HADM_ID.apply(lambda hadm_id: np.max(data[data.HADM_ID == hadm_id].ENDTIME)))
         merged_data['DURATION'] = pd.to_timedelta(merged_data['ENDTIME'] - merged_data['STARTTIME'], unit='h') / np.timedelta64(1, 'h')
         merged_data.drop(columns=['STARTTIME', 'ENDTIME'])
-        print("ventilation duration calculated")
+        print('[' + time.ctime() + ']', "ventilation duration calculated")
 
     # split into train/valid/test sets
     if args.split_datasets:
@@ -164,7 +165,7 @@ if __name__ == '__main__':
         valid_data.to_csv(os.path.join(args.output_directory, 'validation_notes.csv'), header=False, index=False) 
         test_data.to_csv(os.path.join(args.output_directory, 'test_notes.csv'), header=False, index=False) 
         held_out_ids.to_csv(os.path.join(args.output_directory, 'held_out_ids.csv'), header=False, index=False)
-        print('train/valid/test sets written to', args.output_directory)
+        print('[' + time.ctime() + ']', 'train/valid/test sets written to', args.output_directory)
         
     # generate word indexes
     if not args.use_vocab:
@@ -172,14 +173,14 @@ if __name__ == '__main__':
             word_indexes = {category: get_word_index(train_data[train_data['CATEGORY'] == category]) for category in categories}
         else:
             word_indexes = {category: get_word_index(merged_data[merged_data['CATEGORY'] == category]) for category in categories}
-        print('word indexes generated')
+        print('[' + time.ctime() + ']', 'word indexes generated')
     else:
         word_indexes = {}
         for category in categories:
             with open(os.path.join(args.use_vocab, category_to_id[category] + '_vocab.txt'), 'r') as file:
                 vocab = [line.rstrip('\n') for line in file.readlines()]
             word_indexes[category] = {line.split(',')[0]: line.split(',')[1] for line in vocab}
-        print('read word indexes from', args.use_vocab)
+        print('[' + time.ctime() + ']', 'read word indexes from', args.use_vocab)
 
     # store vocabulary
     if not args.no_vocab:
@@ -187,7 +188,7 @@ if __name__ == '__main__':
             word_index_output = [','.join([word, str(idx)]) for word, idx in word_indexes[category].items()]
             with open(os.path.join(args.output_directory, category_to_id[category] + '_vocab.txt'), "w") as file:
                 file.writelines('\n'.join(word_index_output))
-        print('vocabulary written to', args.output_directory)
+        print('[' + time.ctime() + ']', 'vocabulary written to', args.output_directory)
             
     # create output dataframe
     if not args.split_datasets:
@@ -197,21 +198,21 @@ if __name__ == '__main__':
             (train_output, train_ventilation_duration), (valid_output, valid_ventilation_duration), (test_output, test_ventilation_duration) = \
             pool.starmap(create_output_dataframe, zip([train_data, valid_data, test_data], repeat(word_indexes), repeat(args)))
         
-    print("data ready")
+    print('[' + time.ctime() + ']', "data ready")
     
     # create meta data
     if args.meta_data:
         meta_data = []
         for category in categories:
             meta_data += [" ".join([category_to_id[category], str(idx), "1"]) for idx in word_indexes[category].values()]
-        print("meta data ready")
+        print('[' + time.ctime() + ']', "meta data ready")
     
     # write to output
     if not args.no_data:
         if not args.split_datasets:
             with open(os.path.join(args.output_directory, 'data.txt'), "w") as file:
                 file.writelines("\n".join(output))
-            print("data written to", os.path.join(args.output_directory, 'data.txt'))
+            print('[' + time.ctime() + ']', "data written to", os.path.join(args.output_directory, 'data.txt'))
         else:
             with open(os.path.join(args.output_directory, 'train_data.txt'), "w") as file:
                 file.writelines("\n".join(train_output))
@@ -219,16 +220,16 @@ if __name__ == '__main__':
                 file.writelines("\n".join(valid_output))
             with open(os.path.join(args.output_directory, 'test_data.txt'), "w") as file:
                 file.writelines("\n".join(test_output))
-            print("data written to", os.path.join(args.output_directory, 'train_data/validation_data/test_data.txt'))
+            print('[' + time.ctime() + ']', "data written to", os.path.join(args.output_directory, 'train_data/validation_data/test_data.txt'))
     if args.meta_data:
         with open(os.path.join(args.output_directory, 'meta.txt'), "w") as file:
             file.writelines("\n".join(meta_data))
-        print("meta data written to", os.path.join(args.output_directory, 'meta.txt'))
+        print('[' + time.ctime() + ']', "meta data written to", os.path.join(args.output_directory, 'meta.txt'))
     if args.ventilation_duration:
         if not args.split_datasets:
             with open(os.path.join(args.output_directory, 'vent.txt'), "w") as file:
                 file.writelines("\n".join(ventilation_duration))
-            print("ventilation duration written to", os.path.join(args.output_directory, 'vent.txt'))
+            print('[' + time.ctime() + ']', "ventilation duration written to", os.path.join(args.output_directory, 'vent.txt'))
         else:
             with open(os.path.join(args.output_directory, 'train_vent.txt'), "w") as file:
                 file.writelines("\n".join(train_ventilation_duration))
@@ -236,4 +237,4 @@ if __name__ == '__main__':
                 file.writelines("\n".join(valid_ventilation_duration))
             with open(os.path.join(args.output_directory, 'test_vent.txt'), "w") as file:
                 file.writelines("\n".join(test_ventilation_duration))
-            print("ventilation duration written to", os.path.join(args.output_directory, 'train_vent/validation_vent/test_vent.txt'))
+            print('[' + time.ctime() + ']', "ventilation duration written to", os.path.join(args.output_directory, 'train_vent/validation_vent/test_vent.txt'))
