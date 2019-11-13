@@ -30,6 +30,7 @@ def parse_args():
     parser.add_argument('--no_vocab', action='store_true', help='NOT storing vocabulary')
     parser.add_argument('-m', '--meta_data', action='store_true', help='output meta data (default not)')
     parser.add_argument('-v', '--ventilation_duration', action='store_true', help='output ventilation duration (default not)')
+    parser.add_argument('--binarized_mv', action='store_true', help='using Label in files that do not have continuous MV durations')
     parser.add_argument('-s', '--split_datasets', action='store_true', help='split the whole cohort into train/validation/test (default not)')
     parser.add_argument('--discard_ids', help='csv file containing the HADM_IDs that should be discarded')
     parser.add_argument('--no_phy', action='store_true', help='NOT using physicians notes')
@@ -38,6 +39,37 @@ def parse_args():
     parser.add_argument('--other', action='store_true', help='using nursing/other notes. WARNING: this category contain other types of notes e.g. discharge summary, use with caution')
     parser.add_argument('--max_procs', type=int, help='maximal number of processes (default 10)', default=10)
     return parser.parse_args()
+
+# print args for double check
+def print_args(args):
+    print('Input file:', args.input_file_path)
+    print('Output directory:', args.output_directory)
+    print('Using', args.max_procs, 'cores')
+    if args.no_data:
+        print('Not outputting data file for mixehr')
+    if args.use_vocab:
+        print('Using vocabulary from', args.use_vocab)
+    if args.no_vocab:
+        print('Not outputting vocabulary')
+    if args.meta_data:
+        print('Outputting meta data')
+    if args.ventilation_duration:
+        if not args.binarized_mv:
+            print('Outputting continuous MV duration')
+        else:
+            print('Outputting binarized MV duration')
+    if args.split_datasets:
+        print('Splitting into train/valiation/test')
+    if args.discard_ids:
+        print('Discarding HADM_IDs in', args.discard_ids)
+    if args.no_phy:
+        print('Not using physician notes')
+    if args.no_nur:
+        print('Not using nursing notes')
+    if args.res:
+        print('Using respiratory notes')
+    if args.other:
+        print('Using nursing/other notes')
 
 def merge_notes(hadm_id, category):
     tmp_data = data[data.HADM_ID == hadm_id]
@@ -86,7 +118,10 @@ def create_output_dataframe(data, word_indexes, args):
                         output.append(" ".join([str(idx), category_to_id[row['CATEGORY']], str(word_indexes[row['CATEGORY']][word]), "0", str(unigram_counts[word])]))
                     if args.ventilation_duration and not set_ventilation:
                         set_ventilation = True
-                        ventilation_duration.append(" ".join([str(idx), str(data[data.HADM_ID == id]["DURATION"].values[0])]))
+                        if not args.binarized_mv:
+                            ventilation_duration.append(" ".join([str(idx), str(data[data.HADM_ID == id]["DURATION"].values[0])]))
+                        else:
+                            ventilation_duration.append(" ".join([str(idx), str(data[data.HADM_ID == id]["BI_DURATION"].values[0])]))
     
 #     for idx, id in tqdm(enumerate(ids)):
 #         set_ventilation = False # indicate whether ventilation duration is calculated
@@ -110,6 +145,9 @@ if __name__ == '__main__':
         raise Exception('not using any type of note (physicians, nurses, respiratory, nursing/other)')
     if args.use_vocab:
         args.no_vocab = True
+        
+    # print arguments for double check
+    print_args(args)
 
     data = pd.read_csv(args.input_file_path)
     print('[' + time.ctime() + ']', "data read")
@@ -145,15 +183,21 @@ if __name__ == '__main__':
 
     # get ventilation duration
     if args.ventilation_duration:
-        try:
-            merged_data['STARTTIME'] = pd.to_datetime(merged_data.HADM_ID.apply(lambda hadm_id: np.min(data[data.HADM_ID == hadm_id].STARTTIME)))
-        except:
-            # accommadating files that use FIRST_VENT_STARTTIME to represent STARTTIME
-            merged_data['STARTTIME'] = pd.to_datetime(merged_data.HADM_ID.apply(lambda hadm_id: np.min(data[data.HADM_ID == hadm_id].FIRST_VENT_STARTTIME)))
-        merged_data['ENDTIME'] = pd.to_datetime(merged_data.HADM_ID.apply(lambda hadm_id: np.max(data[data.HADM_ID == hadm_id].ENDTIME)))
-        merged_data['DURATION'] = pd.to_timedelta(merged_data['ENDTIME'] - merged_data['STARTTIME'], unit='h') / np.timedelta64(1, 'h')
-        merged_data.drop(columns=['STARTTIME', 'ENDTIME'])
-        print('[' + time.ctime() + ']', "ventilation duration calculated")
+        if not args.binarized_mv:
+            try:
+                merged_data['STARTTIME'] = pd.to_datetime(merged_data.HADM_ID.apply(lambda hadm_id: np.min(data[data.HADM_ID == hadm_id].STARTTIME)))
+            except:
+                # accommadating files that use FIRST_VENT_STARTTIME to represent STARTTIME
+                merged_data['STARTTIME'] = pd.to_datetime(merged_data.HADM_ID.apply(lambda hadm_id: np.min(data[data.HADM_ID == hadm_id].FIRST_VENT_STARTTIME)))
+            merged_data['ENDTIME'] = pd.to_datetime(merged_data.HADM_ID.apply(lambda hadm_id: np.max(data[data.HADM_ID == hadm_id].ENDTIME)))
+            merged_data['DURATION'] = pd.to_timedelta(merged_data['ENDTIME'] - merged_data['STARTTIME'], unit='h') / np.timedelta64(1, 'h')
+            merged_data.drop(columns=['STARTTIME', 'ENDTIME'])
+            print('[' + time.ctime() + ']', "ventilation duration calculated")
+        else:
+            # accommadating files that have no information of MV sessions but only labels indicating prolonged or not
+            print('[' + time.ctime() + ']', "WARNING: no continuous MV duration available, using Label")
+            merged_data['BI_DURATION'] = merged_data.HADM_ID.apply(lambda hadm_id: data[data.HADM_ID == hadm_id].Label.values[0])
+            print('[' + time.ctime() + ']', "binarized ventilation duration calculated")
 
     # split into train/valid/test sets
     if args.split_datasets:
@@ -227,14 +271,28 @@ if __name__ == '__main__':
         print('[' + time.ctime() + ']', "meta data written to", os.path.join(args.output_directory, 'meta.txt'))
     if args.ventilation_duration:
         if not args.split_datasets:
-            with open(os.path.join(args.output_directory, 'vent.txt'), "w") as file:
-                file.writelines("\n".join(ventilation_duration))
-            print('[' + time.ctime() + ']', "ventilation duration written to", os.path.join(args.output_directory, 'vent.txt'))
+            if not args.binarized_mv:
+                with open(os.path.join(args.output_directory, 'vent.txt'), "w") as file:
+                    file.writelines("\n".join(ventilation_duration))
+                print('[' + time.ctime() + ']', "ventilation duration written to", os.path.join(args.output_directory, 'vent.txt'))
+            else:
+                with open(os.path.join(args.output_directory, 'bi_vent.txt'), "w") as file:
+                    file.writelines("\n".join(ventilation_duration))
+                print('[' + time.ctime() + ']', "binarized ventilation duration written to", os.path.join(args.output_directory, 'bi_vent.txt'))
         else:
-            with open(os.path.join(args.output_directory, 'train_vent.txt'), "w") as file:
-                file.writelines("\n".join(train_ventilation_duration))
-            with open(os.path.join(args.output_directory, 'validation_vent.txt'), "w") as file:
-                file.writelines("\n".join(valid_ventilation_duration))
-            with open(os.path.join(args.output_directory, 'test_vent.txt'), "w") as file:
-                file.writelines("\n".join(test_ventilation_duration))
-            print('[' + time.ctime() + ']', "ventilation duration written to", os.path.join(args.output_directory, 'train_vent/validation_vent/test_vent.txt'))
+            if not args.binarized_mv:
+                with open(os.path.join(args.output_directory, 'train_vent.txt'), "w") as file:
+                    file.writelines("\n".join(train_ventilation_duration))
+                with open(os.path.join(args.output_directory, 'validation_vent.txt'), "w") as file:
+                    file.writelines("\n".join(valid_ventilation_duration))
+                with open(os.path.join(args.output_directory, 'test_vent.txt'), "w") as file:
+                    file.writelines("\n".join(test_ventilation_duration))
+                print('[' + time.ctime() + ']', "ventilation duration written to", os.path.join(args.output_directory, 'train_vent/validation_vent/test_vent.txt'))
+            else:
+                with open(os.path.join(args.output_directory, 'train_bi_vent.txt'), "w") as file:
+                    file.writelines("\n".join(train_ventilation_duration))
+                with open(os.path.join(args.output_directory, 'validation_bi_vent.txt'), "w") as file:
+                    file.writelines("\n".join(valid_ventilation_duration))
+                with open(os.path.join(args.output_directory, 'test_bi_vent.txt'), "w") as file:
+                    file.writelines("\n".join(test_ventilation_duration))
+                print('[' + time.ctime() + ']', "binarized ventilation duration written to", os.path.join(args.output_directory, 'train_bi_vent/validation_bi_vent/test_bi_vent.txt'))
