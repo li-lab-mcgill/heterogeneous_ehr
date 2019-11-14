@@ -170,7 +170,7 @@ if __name__ == '__main__':
         discard_ids_df.columns = ['HADM_ID']
         discard_ids = discard_ids_df['HADM_ID'].tolist()
         merged_data = merged_data[~merged_data['HADM_ID'].isin(discard_ids)]
-        print('discarding', len(discard_ids), 'HADM_IDs')
+        print('[' + time.ctime() + ']', 'discarding', len(discard_ids), 'HADM_IDs')
     with Pool(processes=args.max_procs) as pool:
         merged_data["ALLTEXT"] = pool.starmap(merge_notes, zip(merged_data['HADM_ID'], merged_data['CATEGORY']))
     merged_data.dropna()
