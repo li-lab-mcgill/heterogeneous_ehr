@@ -25,6 +25,10 @@ def parse_args():
     parser.add_argument('--binarized_mv', action='store_true', help='using Label in files that do not have continuous MV durations')
     parser.add_argument('-s', '--split_datasets', action='store_true', help='split the whole cohort into train/validation/test (default not)')
     parser.add_argument('--discard_ids', help='csv file containing the HADM_IDs that should be discarded')
+    parser.add_argument('--no_phy', action='store_true', help='NOT using physicians notes')
+    parser.add_argument('--no_nur', action='store_true', help='NOT using nurses notes')
+    parser.add_argument('--res', action='store_true', help='using respiratory notes')
+    parser.add_argument('--other', action='store_true', help='using nursing/other notes. WARNING: this category contain other types of notes e.g. discharge summary, use with caution')
     parser.add_argument('--max_procs', type=int, help='maximal number of processes (default 10)', default=10)
     return parser.parse_args()
 
@@ -50,6 +54,14 @@ def print_args(args):
         print('Splitting into train/valiation/test')
     if args.discard_ids:
         print('Discarding HADM_IDs in', args.discard_ids)
+    if args.no_phy:
+        print('Not using physician notes')
+    if args.no_nur:
+        print('Not using nursing notes')
+    if args.res:
+        print('Using respiratory notes')
+    if args.other:
+        print('Using nursing/other notes')
 
 def merge_notes(hadm_id):
     return "\n".join(data[data.HADM_ID == hadm_id].TEXT)
@@ -119,6 +131,8 @@ if __name__ == '__main__':
     args = parse_args()
     if args.no_vocab and args.no_data and not args.meta_data and not args.ventilation_duration:
         raise Exception('no output specified')
+    if args.no_phy and args.no_nur and not args.res:
+        raise Exception('not using any type of note (physicians, nurses, respiratory, nursing/other)')
     if args.use_vocab:
         args.no_vocab = True
         
@@ -128,8 +142,19 @@ if __name__ == '__main__':
     data = pd.read_csv(args.input_file_path)
     print('[' + time.ctime() + ']', "data read")
     
+    categories = []
+    if not args.no_phy:
+        categories.append('Physician ')
+    if not args.no_nur:
+        categories.append('Nursing')
+    if args.res:
+        categories.append('Respiratory ')
+    if args.other:
+        categories.append('Nursing/other')
+    args.categories = categories
+    
     # merge notes of same HADM_ID of specified categories
-    merged_data = data[["HADM_ID"]].drop_duplicates()
+    merged_data = data[data['CATEGORY'].isin(categories)][["HADM_ID"]].drop_duplicates()
     if args.discard_ids:
         discard_ids_df = pd.read_csv(args.discard_ids, header=None)
         discard_ids_df.columns = ['HADM_ID']
