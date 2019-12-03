@@ -25,6 +25,7 @@ def parse_args():
     parser.add_argument('--binarized_mv', action='store_true', help='using Label in files that do not have continuous MV durations')
     parser.add_argument('-s', '--split_datasets', action='store_true', help='split the whole cohort into train/validation/test (default not)')
     parser.add_argument('--discard_ids', help='csv file containing the HADM_IDs that should be discarded')
+    parser.add_argument('--use_all_types', action='store_true', help='NOT restricting note types')
     parser.add_argument('--no_phy', action='store_true', help='NOT using physicians notes')
     parser.add_argument('--no_nur', action='store_true', help='NOT using nurses notes')
     parser.add_argument('--res', action='store_true', help='using respiratory notes')
@@ -54,6 +55,8 @@ def print_args(args):
         print('Splitting into train/valiation/test')
     if args.discard_ids:
         print('Discarding HADM_IDs in', args.discard_ids)
+    if args.use_all_types:
+        print('Using all note types, ignoring no_phy, no_nur, res and other options.')
     if args.no_phy:
         print('Not using physician notes')
     if args.no_nur:
@@ -142,19 +145,23 @@ if __name__ == '__main__':
     data = pd.read_csv(args.input_file_path)
     print('[' + time.ctime() + ']', "data read")
     
-    categories = []
-    if not args.no_phy:
-        categories.append('Physician ')
-    if not args.no_nur:
-        categories.append('Nursing')
-    if args.res:
-        categories.append('Respiratory ')
-    if args.other:
-        categories.append('Nursing/other')
-    args.categories = categories
+    if not args.use_all_types:
+        categories = []
+        if not args.no_phy:
+            categories.append('Physician ')
+        if not args.no_nur:
+            categories.append('Nursing')
+        if args.res:
+            categories.append('Respiratory ')
+        if args.other:
+            categories.append('Nursing/other')
+        args.categories = categories
     
     # merge notes of same HADM_ID of specified categories
-    merged_data = data[data['CATEGORY'].isin(categories)][["HADM_ID"]].drop_duplicates()
+    if args.use_all_types:
+        merged_data = data[["HADM_ID"]].drop_duplicates()
+    else:
+        merged_data = data[data['CATEGORY'].isin(categories)][["HADM_ID"]].drop_duplicates()
     if args.discard_ids:
         discard_ids_df = pd.read_csv(args.discard_ids, header=None)
         discard_ids_df.columns = ['HADM_ID']
