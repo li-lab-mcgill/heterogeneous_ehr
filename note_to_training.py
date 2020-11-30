@@ -7,8 +7,7 @@ from sklearn.feature_extraction.text import CountVectorizer
 import pandas as pd
 import numpy as np
 from tqdm import tqdm
-import parmap
-import os, pickle
+import os, pickle, warnings
 from multiprocessing import Pool
 from itertools import repeat
 import time
@@ -28,6 +27,7 @@ def parse_args():
     parser.add_argument('--no_data', action='store_true', help='NOT outputing data')
     parser.add_argument('--use_vocab', help='specify directory containing the vocabulary to use. setting no_vocab to true')
     parser.add_argument('--no_vocab', action='store_true', help='NOT storing vocabulary')
+    parser.add_argument('--max_df', type=float, default=0.15, help='maximal document frequency (default 0.15)')
     parser.add_argument('-m', '--meta_data', action='store_true', help='output meta data (default not)')
     parser.add_argument('-v', '--ventilation_duration', action='store_true', help='output ventilation duration (default not)')
     parser.add_argument('--binarized_mv', action='store_true', help='using Label in files that do not have continuous MV durations')
@@ -51,6 +51,8 @@ def print_args(args):
         print('Using vocabulary from', args.use_vocab)
     if args.no_vocab:
         print('Not outputting vocabulary')
+    if not args.no_vocab and args.max_df:
+        print(f'Maximal document frequency: {args.max_df}')
     if args.meta_data:
         print('Outputting meta data')
     if args.ventilation_duration:
@@ -106,7 +108,7 @@ def create_output_dataframe(data, word_indexes, args):
     ids = data["HADM_ID"].unique().tolist()  # HADM_IDs
     output = []
     ventilation_duration = []
-    for idx, id in tqdm(enumerate(ids)):
+    for id in tqdm(ids):
         set_ventilation = False # indicate whether ventilation duration is calculated for current HADM_ID
         if not args.no_data or args.ventilation_duration:
             for _, row in data[data['HADM_ID'] == id].iterrows(): # for one HADM_ID - CATEGORY pair
@@ -115,13 +117,13 @@ def create_output_dataframe(data, word_indexes, args):
                     if word not in word_indexes[row['CATEGORY']].keys():
                         continue
                     if not args.no_data:
-                        output.append(" ".join([str(idx), category_to_id[row['CATEGORY']], str(word_indexes[row['CATEGORY']][word]), "0", str(unigram_counts[word])]))
+                        output.append(" ".join([str(int(id)), category_to_id[row['CATEGORY']], str(word_indexes[row['CATEGORY']][word]), "0", str(unigram_counts[word])]))
                     if args.ventilation_duration and not set_ventilation:
                         set_ventilation = True
                         if not args.binarized_mv:
-                            ventilation_duration.append(" ".join([str(idx), str(data[data.HADM_ID == id]["DURATION"].values[0])]))
+                            ventilation_duration.append(" ".join([str(int(id)), str(data[data.HADM_ID == id]["DURATION"].values[0])]))
                         else:
-                            ventilation_duration.append(" ".join([str(idx), str(data[data.HADM_ID == id]["BI_DURATION"].values[0])]))
+                            ventilation_duration.append(" ".join([str(int(id)), str(data[data.HADM_ID == id]["BI_DURATION"].values[0])]))
     
 #     for idx, id in tqdm(enumerate(ids)):
 #         set_ventilation = False # indicate whether ventilation duration is calculated
@@ -145,6 +147,8 @@ if __name__ == '__main__':
         raise Exception('not using any type of note (physicians, nurses, respiratory, nursing/other)')
     if args.use_vocab:
         args.no_vocab = True
+    if args.no_vocab and args.max_df:
+        warnings.warn('not generating vocabulary, max_df is not effective')
         
     # print arguments for double check
     print_args(args)
@@ -164,6 +168,7 @@ if __name__ == '__main__':
     args.categories = categories
     
     # merge notes of same HADM_ID of specified categories
+    data.dropna(subset=['HADM_ID', 'CATEGORY', 'TEXT'], inplace=True)
     merged_data = data[data['CATEGORY'].isin(categories)][["HADM_ID", "CATEGORY"]].drop_duplicates()
     if args.discard_ids:
         discard_ids_df = pd.read_csv(args.discard_ids, header=None)
@@ -173,7 +178,7 @@ if __name__ == '__main__':
         print('[' + time.ctime() + ']', 'discarding', len(discard_ids), 'HADM_IDs')
     with Pool(processes=args.max_procs) as pool:
         merged_data["ALLTEXT"] = pool.starmap(merge_notes, zip(merged_data['HADM_ID'], merged_data['CATEGORY']))
-    merged_data.dropna()
+    # merged_data.dropna(subset=['HADM_ID', 'CATEGORY', 'TEXT'], inplace=True)
     print('[' + time.ctime() + ']', 'after merging notes of same HADM_ID and same CATEGORY, we have', merged_data.shape[0], 'unique HADM_ID - CATEGORY pairs')
 
     # preprocess notes
@@ -214,9 +219,9 @@ if __name__ == '__main__':
     # generate word indexes
     if not args.use_vocab:
         if args.split_datasets:
-            word_indexes = {category: get_word_index(train_data[train_data['CATEGORY'] == category]) for category in categories}
+            word_indexes = {category: get_word_index(train_data[train_data['CATEGORY'] == category], max_df=args.max_df) for category in categories}
         else:
-            word_indexes = {category: get_word_index(merged_data[merged_data['CATEGORY'] == category]) for category in categories}
+            word_indexes = {category: get_word_index(merged_data[merged_data['CATEGORY'] == category], max_df=args.max_df) for category in categories}
         print('[' + time.ctime() + ']', 'word indexes generated')
     else:
         word_indexes = {}
