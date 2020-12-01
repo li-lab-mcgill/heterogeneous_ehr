@@ -12,7 +12,7 @@ This repository is organized by task. The code for mechanical ventilation predic
 
 This project makes use of the MIMIC-III dataset to predict the duration of mechanical ventilation for patients.
 
-This code assumes you have the cohort file and the notes file handy. MIMIC-III is a restriced-access dataset, please consult their ![website](https://physionet.org/content/mimiciii/1.4/) to gain credential.
+This code assumes you have the cohort file and the notes file handy. MIMIC-III is a restriced-access dataset, please consult their [website](https://physionet.org/content/mimiciii/1.4/) to gain credential.
 
 In order to do so, the MIMIC-III dataset needs to be cleaned and filtered to include information from a chosen cohort of patients. 
 
@@ -53,7 +53,7 @@ In the output folder as specified, the data file is named `data.txt` and meta da
 
 ## Topic modeling
 
-For topic modeling, we use the implementation of ![MixEHR](https://github.com/li-lab-mcgill/mixehr). For instruction of running MixEHR, please refer to their repository.
+For topic modeling, we use the implementation of [MixEHR](https://github.com/li-lab-mcgill/mixehr). For instruction of running MixEHR, please refer to their repository.
 
 ## Simulation study
 
