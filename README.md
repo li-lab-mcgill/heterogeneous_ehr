@@ -48,3 +48,13 @@ There is subtle differences between different versions of the script, as listed 
 - `note_to_training_singledatatype.py`: treat all tokens as one note type
 - `note_to_training_singledatatype_diff.py`: treat all tokens as one note type, but differentiate tokens from different tokens by treating them as different tokens
 - `mortality/note_to_training_mor*.py`: the same as `note_to_training*.py`, but generate mortality labels instead of MV outcomes
+
+In the output folder as specified, the data file is named `data.txt` and meta data `meta.txt`, which are essential for running our topic model.
+
+## Topic modeling
+
+For topic modeling, we use the implementation of ![MixEHR](https://github.com/li-lab-mcgill/mixehr). For instruction of running MixEHR, please refer to their repository.
+
+## Simulation study
+
+Coming soon.
