@@ -57,4 +57,15 @@ For topic modeling, we use the implementation of [MixEHR](https://github.com/li-
 
 ## Simulation study
 
-Coming soon.
+In order to study the performance of our inference algorithm, we run experiments on simulated datasets with various controlled parameters (such as the number of patients, number of tokens, vocabulary size and the number of note types). We then correlate the topic mixture learned from this simulated data with the ground truth topics and calculate the correlation between the two. If our inference algorithm is capable of recovering the hidden topics from documents, the recovered topics should strongly correlate with the ground truth.
+
+In order to generate simulated data, refer to `simulation/mixehr_simulation.ipynb`. This code can be used to simulate data for:
+
+- `number of patients = [1000, 4000, 8000]`
+- `number of tokens = [1000, 1500, 2000]`
+- `vocabulary size = [2000, 2500, 3000]`
+- `number of note-types = [1, 2, 4]`
+
+It generates the data files and meta files for running the topic model as mentioned in the above section. In order to compare the heterogenous_ehr model with the baseline LDA model, refer to `simulation/run_baselines.ipynb` which converts the multi-note type data to single-note type. This modified data can then be used for running LDA topic model.
+
+On obtaining the inferred patient-topic mixture (theta) and topic-vocabulary distribution (phi) after training the topic model, the correlation with the ground truth can be calculated by running `python simulation/find_pearson_correlation_phi.py` and `python simulation/find_pearson_correlation_theta.py` for $\phi$ and $\theta$ respectively. The plots shown in the paper can be reproduced by referring to `simulation/plot_results.ipynb`. 
